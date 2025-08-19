@@ -1,0 +1,33 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Vite build output
+frontend/dist/
+
+# Runtime artifacts
+uploads/
+dbdata/
+*.sqlite
+*.db
+
+# Docker
+*.pid
+*.log
+*.tmp
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+backend/.env
+frontend/.env
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
