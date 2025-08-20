@@ -1,191 +1,753 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import { api, absUrl } from '../api.js'
-import { fmtDist, fmtDur } from '../utils.js'
+import React, { useEffect, useState } from 'react'
+import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet'
 import { useWalk } from '../walkContext.jsx'
+import { fmtDist, fmtDur } from '../utils.js'
+import { api } from '../api.js'
+import L from 'leaflet'
 
-function FollowMap({ lastPos }) {
-  const map = useMap()
-  useEffect(() => { if (lastPos) map.setView([lastPos.lat, lastPos.lon], Math.max(map.getZoom(), 17), { animate: true }) }, [lastPos, map])
-  return null
-}
-function AutoLocate() {
-  const map = useMap()
-  useEffect(() => {
-    const fallback = [40.7128, -74.006]
-    if (!('geolocation' in navigator)) { map.setView(fallback, 13); return }
-    navigator.geolocation.getCurrentPosition(
-      pos => map.setView([pos.coords.latitude, pos.coords.longitude], 15),
-      ()   => map.setView(fallback, 13),
-      { enableHighAccuracy: true, timeout: 8000 }
-    )
-  }, [map])
-  return null
-}
-function paceText(m, s) { if (!m || m < 1 || !s) return '--'; const mi = m / 1609.344; return `${((s/60)/mi).toFixed(1)} min/mi` }
-const emojiHTML = (e) => `<span class="emoji-font">${e}</span>`
-const emojiIcon = (e) => L.divIcon({ className: 'emoji-marker emoji-font', html: emojiHTML(e), iconSize: [24,24], iconAnchor:[12,12] })
+// Custom dog icon for start marker
+const dogIcon = new L.DivIcon({
+  html: '<div style="font-size: 24px;">🐕</div>',
+  className: 'dog-marker',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15]
+})
 
-export function WalkTab({ me }) {
-  const { active, paused, route, events, distance, elapsed, petIds, setPetIds, start, togglePause, finish, drop } = useWalk()
+// Custom icons for events
+const poopIcon = new L.DivIcon({
+  html: '<div style="font-size: 20px;">💩</div>',
+  className: 'event-marker',
+  iconSize: [25, 25],
+  iconAnchor: [12, 12]
+})
+
+const peeIcon = new L.DivIcon({
+  html: '<div style="font-size: 20px;">💧</div>',
+  className: 'event-marker',
+  iconSize: [25, 25],
+  iconAnchor: [12, 12]
+})
+
+const currentLocationIcon = new L.DivIcon({
+  html: '<div style="background: #4CAF50; border: 3px solid white; border-radius: 50%; width: 16px; height: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+  className: 'current-location-marker',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11]
+})
+
+function DogSelector({ selectedPets, onSelectionChange, me }) {
   const [pets, setPets] = useState([])
-  const [collapsed, setCollapsed] = useState(false)
 
-  const [showComplete, setShowComplete] = useState(false)
-  const [notes, setNotes] = useState('')
-  const [groups, setGroups] = useState([])
-  const [shareIds, setShareIds] = useState([])
-  const [saving, setSaving] = useState(false)
-  const [visibility, setVisibility] = useState('private') // 'private'|'friends'|'groups'
-
-  useEffect(() => { if (me) api.pets.list().then(setPets).catch(()=>{}) }, [me])
-  useEffect(() => { if (showComplete) api.groups.mine().then(setGroups).catch(()=>{}) }, [showComplete])
-
-  useEffect(() => { const t = window.twemoji; if (t && typeof t.parse === 'function') t.parse(document.body, { folder: 'svg', ext: '.svg' }) }, [route.length, events.length, collapsed])
-
-  const positions = useMemo(() => route.map(p => [p.lat, p.lon]), [route])
-  const lastPos = route.at(-1)
-  const dogIcon = useMemo(() => L.divIcon({ className: 'dog-marker emoji-font', html: emojiHTML('??'), iconSize: [32,32], iconAnchor:[16,16] }), [])
-
-  async function submitFinish() {
-    if (visibility === 'groups' && shareIds.length === 0) {
-      if (!confirm('No communities selected. Save as Private instead?')) return
-      setVisibility('private')
+  useEffect(() => {
+    if (me) {
+      api.pets.list().then(setPets).catch(console.error)
     }
-    setSaving(true)
-    try {
-      await finish({ notes, group_ids: visibility==='groups' ? shareIds : [], visibility })
-      setShowComplete(false); setNotes(''); setShareIds([]); setVisibility('private')
-      alert('Walk saved!')
-    } catch (e) {
-      alert(e.message || 'Failed to save walk')
-    } finally { setSaving(false) }
+  }, [me])
+
+  if (!pets.length) {
+    return (
+      <div className="small" style={{ color: '#666', fontStyle: 'italic' }}>
+        Add dogs in the Dogs tab first
+      </div>
+    )
   }
 
   return (
-    <div style={{ height: '100%', position: 'relative' }}>
-      <MapContainer center={[40, -74]} zoom={15} minZoom={3} maxZoom={18}>
-        <TileLayer
-          url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-          attribution='Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)'
-        />
-        <AutoLocate />
-        {positions.length > 1 && <Polyline positions={positions} pathOptions={{ color: '#00bcd4', weight: 5 }} />}
-        {positions.length ? <Marker position={positions[0]} icon={emojiIcon('??')}><Popup>Start</Popup></Marker> : null}
-        {positions.length ? <Marker position={positions[positions.length - 1]} icon={dogIcon}><Popup>Walking buddy ??</Popup></Marker> : null}
-        {events.map((ev, i) => (
-          <Marker key={i} position={[ev.lat, ev.lon]} icon={emojiIcon(ev.type === 'poop' ? '??' : ev.type === 'pee' ? '??' : '??')}>
-            <Popup>{ev.type === 'poop' ? '?? Poop' : ev.type === 'pee' ? '?? Pee' : '?? Water'}<br />{new Date(ev.occurred_at).toLocaleTimeString()}</Popup>
-          </Marker>
+    <div>
+      <div className="small" style={{ marginBottom: 8, fontWeight: '500' }}>Walking with:</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {pets.map(pet => (
+          <button
+            key={pet.id}
+            onClick={() => {
+              const newSelection = selectedPets.includes(pet.id)
+                ? selectedPets.filter(id => id !== pet.id)
+                : [...selectedPets, pet.id]
+              onSelectionChange(newSelection)
+            }}
+            style={{
+              padding: '6px 12px',
+              border: '2px solid',
+              borderColor: selectedPets.includes(pet.id) ? '#4CAF50' : '#ddd',
+              borderRadius: '20px',
+              backgroundColor: selectedPets.includes(pet.id) ? '#e8f5e8' : 'white',
+              cursor: 'pointer',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>{selectedPets.includes(pet.id) ? '✓' : ''}</span>
+            <span>{pet.name}</span>
+          </button>
         ))}
-        <FollowMap lastPos={lastPos} />
-      </MapContainer>
+      </div>
+    </div>
+  )
+}
 
-      {/* Bottom sheet */}
-      <div
-        className={`walk-sheet card ${collapsed ? 'min' : ''}`}
-        style={{ position:'fixed', left:'50%', transform:'translateX(-50%)', bottom:'calc(var(--tabs-h) + env(safe-area-inset-bottom, 0px) + 8px)', width:'calc(100% - 24px)', maxWidth:520, zIndex:3000 }}
-      >
-        <div className="sheet-handle" onClick={() => setCollapsed(c => !c)} title={collapsed ? 'Expand' : 'Collapse'}><div className="grabber" /></div>
+function WalkControls() {
+  const { active, paused, elapsed, distance, start, togglePause, finish, drop, petIds, setPetIds } = useWalk()
+  const [me, setMe] = useState(null)
+  const [showFinishModal, setShowFinishModal] = useState(false)
+  const [finishForm, setFinishForm] = useState({ notes: '', visibility: 'private' })
 
-        <div className="stat-row">
-          <div className="stat"><div>Time</div><b>{fmtDur(elapsed)}</b></div>
-          <div className="stat"><div>Distance</div><b>{fmtDist(distance)}</b></div>
-          <div className="stat"><div>Pace</div><b>{paceText(distance, elapsed)}</b></div>
+  useEffect(() => {
+    api.me().then(setMe).catch(() => {})
+  }, [])
+
+  if (!me) {
+    return (
+      <div className="walk-controls">
+        <div className="card">
+          <div className="small">Please sign in to start tracking walks</div>
         </div>
+      </div>
+    )
+  }
 
-        <div className="sheet-body">
+  const handleFinish = async () => {
+    if (!active) return
+    try {
+      await finish(finishForm)
+      setShowFinishModal(false)
+      setFinishForm({ notes: '', visibility: 'private' })
+    } catch (error) {
+      alert('Failed to save walk: ' + error.message)
+    }
+  }
+
+  return (
+    <div className="walk-controls">
+      {/* Stats Display */}
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, textAlign: 'center' }}>
           <div>
-            <label>Walk with:</label>
-            <div className="pet-avatars">
-              {pets.map(p => (
-                <img key={p.id} src={absUrl(p.photo_url) || 'https://placehold.co/64x64'} title={p.name}
-                  onClick={() => setPetIds(ids => ids.includes(p.id) ? ids.filter(i => i !== p.id) : [...ids, p.id])}
-                  style={{ outline: petIds.includes(p.id) ? '3px solid #00bcd4' : 'none', cursor:'pointer' }}/>
-              ))}
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#4CAF50' }}>
+              {fmtDist(distance)}
             </div>
+            <div className="small">Distance</div>
           </div>
-
-          {!active ? (
-            <div style={{ marginTop: 8 }}>
-              <button className="button emoji-font" onClick={start}>?? Start Walk</button>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#2196F3' }}>
+              {fmtDur(elapsed)}
             </div>
-          ) : (
-            <div className="row" style={{ gap: 8, marginTop: 8 }}>
-              <button className="button emoji-font" onClick={togglePause}>{paused ? '?? Resume' : '?? Pause'}</button>
-              <button className="button emoji-font" onClick={() => setShowComplete(true)}>?? Finish</button>
+            <div className="small">Time</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#FF9800' }}>
+              {active ? (paused ? '⏸️' : '▶️') : '⏹️'}
             </div>
-          )}
-
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <div className="chip chip-poop emoji-font"  onClick={() => drop('poop')}>??</div>
-            <div className="chip chip-pee  emoji-font"  onClick={() => drop('pee')}>??</div>
-            <div className="chip chip-water emoji-font" onClick={() => drop('water')}>??</div>
+            <div className="small">Status</div>
           </div>
         </div>
       </div>
 
-      {collapsed && active && !paused && (
-        <div className="chips chips-compact">
-          <div className="chip chip-poop emoji-font"  onClick={() => drop('poop')}>??</div>
-          <div className="chip chip-pee  emoji-font"  onClick={() => drop('pee')}>??</div>
-          <div className="chip chip-water emoji-font" onClick={() => drop('water')}>??</div>
+      {/* Dog Selection (only show when not walking) */}
+      {!active && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <DogSelector 
+            selectedPets={petIds} 
+            onSelectionChange={setPetIds} 
+            me={me} 
+          />
         </div>
       )}
 
-      {/* Complete Walk modal */}
-      {showComplete && (
-        <div className="modal">
-          <div className="modal-card">
-            <div className="row" style={{ justifyContent:'space-between', alignItems:'center' }}>
-              <b>Complete Walk</b>
-              <button className="button" onClick={() => setShowComplete(false)}>Cancel</button>
+      {/* Main Controls */}
+      <div className="card">
+        {!active ? (
+          <button 
+            className="button" 
+            onClick={start}
+            disabled={petIds.length === 0}
+            style={{ 
+              width: '100%', 
+              backgroundColor: '#4CAF50', 
+              color: 'white',
+              fontSize: '18px',
+              padding: '16px'
+            }}
+          >
+            🐕 Start Walk
+          </button>
+        ) : (
+          <div>
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <button 
+                className="button" 
+                onClick={togglePause}
+                style={{ 
+                  flex: 1,
+                  backgroundColor: paused ? '#4CAF50' : '#FF9800',
+                  color: 'white'
+                }}
+              >
+                {paused ? '▶️ Resume' : '⏸️ Pause'}
+              </button>
+              <button 
+                className="button" 
+                onClick={() => setShowFinishModal(true)}
+                style={{ 
+                  flex: 1,
+                  backgroundColor: '#f44336',
+                  color: 'white'
+                }}
+              >
+                🏁 Finish
+              </button>
             </div>
 
-            <div className="row" style={{ gap:12, marginTop:12, flexWrap:'wrap' }}>
-              <div className="stat"><div className="small">Distance</div><b>{fmtDist(distance)}</b></div>
-              <div className="stat"><div className="small">Duration</div><b>{fmtDur(elapsed)}</b></div>
-              {events.length ? <div className="stat"><div className="small">Events</div><b>{events.length}</b></div> : null}
-            </div>
-
-            <label style={{ marginTop:12 }}>Notes</label>
-            <textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="How did the walk go? Terrain, behavior, weather�"/>
-
-            <label style={{ marginTop:12 }}>Visibility</label>
-            <div className="segmented">
-              <button className={visibility==='private'?'active':''} onClick={()=>setVisibility('private')}>Private</button>
-              <button className={visibility==='friends'?'active':''} onClick={()=>setVisibility('friends')}>Friends-only</button>
-              <button className={visibility==='groups'?'active':''} onClick={()=>setVisibility('groups')}>Community</button>
-            </div>
-
-            {visibility === 'groups' && (
-              <div className="card" style={{ marginTop:12 }}>
-                <b>Share to Communities</b>
-                {groups.length === 0 ? (
-                  <div className="small" style={{ marginTop:6 }}>You�re not in any groups yet. Join from the Feed tab.</div>
-                ) : (
-                  <div className="grid" style={{ marginTop:8 }}>
-                    {groups.map(g => (
-                      <label key={g.id} className="row" style={{ justifyContent:'space-between' }}>
-                        <span>{g.name} {g.privacy!=='public' ? <span className="small">({g.privacy})</span> : null}</span>
-                        <input type="checkbox"
-                          checked={shareIds.includes(g.id)}
-                          onChange={e => setShareIds(x => e.target.checked ? [...x, g.id] : x.filter(id=>id!==g.id))}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                )}
+            {/* Event Markers */}
+            <div>
+              <div className="small" style={{ marginBottom: 8, fontWeight: '500' }}>Mark Events:</div>
+              <div className="row" style={{ gap: 8 }}>
+                <button 
+                  className="button" 
+                  onClick={() => drop('poop')}
+                  style={{ flex: 1, backgroundColor: '#8B4513', color: 'white' }}
+                >
+                  💩 Poop
+                </button>
+                <button 
+                  className="button" 
+                  onClick={() => drop('pee')}
+                  style={{ flex: 1, backgroundColor: '#FFD700', color: '#333' }}
+                >
+                  💧 Pee
+                </button>
               </div>
-            )}
+            </div>
+          </div>
+        )}
+      </div>
 
-            <div className="row" style={{ gap:8, marginTop:12 }}>
-              <button className="button" onClick={submitFinish} disabled={saving}>{saving ? 'Saving�' : 'Save Walk'}</button>
+      {/* Finish Walk Modal */}
+      {showFinishModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: 16
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 400 }}>
+            <h3 style={{ margin: '0 0 16px 0' }}>Finish Walk</h3>
+            
+            <label>Notes (optional)</label>
+            <textarea
+              value={finishForm.notes}
+              onChange={(e) => setFinishForm({...finishForm, notes: e.target.value})}
+              placeholder="How was the walk?"
+              rows={3}
+              style={{ width: '100%', marginBottom: 12, resize: 'vertical' }}
+            />
+
+            <label>Privacy</label>
+            <select
+              value={finishForm.visibility}
+              onChange={(e) => setFinishForm({...finishForm, visibility: e.target.value})}
+              style={{ width: '100%', marginBottom: 16 }}
+            >
+              <option value="private">Private</option>
+              <option value="friends">Friends Only</option>
+              <option value="groups">Share to Groups</option>
+            </select>
+
+            <div className="row" style={{ gap: 8 }}>
+              <button 
+                className="button" 
+                onClick={() => setShowFinishModal(false)}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="button" 
+                onClick={handleFinish}
+                style={{ 
+                  flex: 1, 
+                  backgroundColor: '#4CAF50', 
+                  color: 'white' 
+                }}
+              >
+                Save Walk
+              </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+export function WalkTab({ me }) {
+  const { route, events, active } = useWalk()
+  const [mapCenter, setMapCenter] = useState([40.0, -74.0])
+  const [userLocation, setUserLocation] = useState(null)
+
+  // Get user's current location for map center
+  useEffect(() => {
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords
+          setMapCenter([latitude, longitude])
+          setUserLocation([latitude, longitude])
+        },
+        () => {
+          console.log('Location access denied')
+        },
+        { enableHighAccuracy: true, maximumAge: 60000, timeout: 10000 }
+      )
+    }
+  }, [])
+
+  const pathStyle = { color: '#4CAF50', weight: 4 }
+  const routePoints = route.map(p => [p.lat, p.lon])
+  const eventMarkers = events.map((event, idx) => ({
+    ...event,
+    id: idx,
+    position: [event.lat, event.lon]
+  }))
+
+  return (
+    <div style={{ height: '100%', position: 'relative' }}>
+      {/* Map */}
+      <div style={{ height: 'calc(100% - 200px)' }}>
+        <MapContainer 
+          center={mapCenter} 
+          zoom={16} 
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; OpenStreetMap contributors'
+          />
+          
+          {/* Current route */}
+          {routePoints.length > 1 && (
+            <Polyline positions={routePoints} pathOptions={pathStyle} />
+          )}
+          
+          {/* Start marker (dog icon) */}
+          {routePoints.length > 0 && (
+            <Marker position={routePoints[0]} icon={dogIcon} />
+          )}
+          
+          {/* Current location */}
+          {userLocation && (
+            <Marker position={userLocation} icon={currentLocationIcon} />
+          )}
+          
+          {/* Event markers */}
+          {eventMarkers.map(event => (
+            <Marker
+              key={event.id}
+              position={event.position}
+              icon={event.type === 'poop' ? poopIcon : peeIcon}
+            />
+          ))}
+        </MapContainer>
+      </div>
+
+      {/* Controls Panel - Fixed at bottom */}
+      <div style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '200px',
+        backgroundColor: 'white',
+        borderTop: '1px solid #ddd',
+        overflow: 'auto',
+        padding: 12
+      }}>
+        <WalkControls />
+      </div>
+    </div>
+  )
+}import React, { useEffect, useState } from 'react'
+import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet'
+import { useWalk } from '../walkContext.jsx'
+import { fmtDist, fmtDur } from '../utils.js'
+import { api } from '../api.js'
+import L from 'leaflet'
+
+// Custom dog icon for start marker
+const dogIcon = new L.DivIcon({
+  html: '<div style="font-size: 24px;">🐕</div>',
+  className: 'dog-marker',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15]
+})
+
+// Custom icons for events
+const poopIcon = new L.DivIcon({
+  html: '<div style="font-size: 20px;">💩</div>',
+  className: 'event-marker',
+  iconSize: [25, 25],
+  iconAnchor: [12, 12]
+})
+
+const peeIcon = new L.DivIcon({
+  html: '<div style="font-size: 20px;">💧</div>',
+  className: 'event-marker',
+  iconSize: [25, 25],
+  iconAnchor: [12, 12]
+})
+
+const currentLocationIcon = new L.DivIcon({
+  html: '<div style="background: #4CAF50; border: 3px solid white; border-radius: 50%; width: 16px; height: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+  className: 'current-location-marker',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11]
+})
+
+function DogSelector({ selectedPets, onSelectionChange, me }) {
+  const [pets, setPets] = useState([])
+
+  useEffect(() => {
+    if (me) {
+      api.pets.list().then(setPets).catch(console.error)
+    }
+  }, [me])
+
+  if (!pets.length) {
+    return (
+      <div className="small" style={{ color: '#666', fontStyle: 'italic' }}>
+        Add dogs in the Dogs tab first
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="small" style={{ marginBottom: 8, fontWeight: '500' }}>Walking with:</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {pets.map(pet => (
+          <button
+            key={pet.id}
+            onClick={() => {
+              const newSelection = selectedPets.includes(pet.id)
+                ? selectedPets.filter(id => id !== pet.id)
+                : [...selectedPets, pet.id]
+              onSelectionChange(newSelection)
+            }}
+            style={{
+              padding: '6px 12px',
+              border: '2px solid',
+              borderColor: selectedPets.includes(pet.id) ? '#4CAF50' : '#ddd',
+              borderRadius: '20px',
+              backgroundColor: selectedPets.includes(pet.id) ? '#e8f5e8' : 'white',
+              cursor: 'pointer',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>{selectedPets.includes(pet.id) ? '✓' : ''}</span>
+            <span>{pet.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function WalkControls() {
+  const { active, paused, elapsed, distance, start, togglePause, finish, drop, petIds, setPetIds } = useWalk()
+  const [me, setMe] = useState(null)
+  const [showFinishModal, setShowFinishModal] = useState(false)
+  const [finishForm, setFinishForm] = useState({ notes: '', visibility: 'private' })
+
+  useEffect(() => {
+    api.me().then(setMe).catch(() => {})
+  }, [])
+
+  if (!me) {
+    return (
+      <div className="walk-controls">
+        <div className="card">
+          <div className="small">Please sign in to start tracking walks</div>
+        </div>
+      </div>
+    )
+  }
+
+  const handleFinish = async () => {
+    if (!active) return
+    try {
+      await finish(finishForm)
+      setShowFinishModal(false)
+      setFinishForm({ notes: '', visibility: 'private' })
+    } catch (error) {
+      alert('Failed to save walk: ' + error.message)
+    }
+  }
+
+  return (
+    <div className="walk-controls">
+      {/* Stats Display */}
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, textAlign: 'center' }}>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#4CAF50' }}>
+              {fmtDist(distance)}
+            </div>
+            <div className="small">Distance</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#2196F3' }}>
+              {fmtDur(elapsed)}
+            </div>
+            <div className="small">Time</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#FF9800' }}>
+              {active ? (paused ? '⏸️' : '▶️') : '⏹️'}
+            </div>
+            <div className="small">Status</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Dog Selection (only show when not walking) */}
+      {!active && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <DogSelector 
+            selectedPets={petIds} 
+            onSelectionChange={setPetIds} 
+            me={me} 
+          />
+        </div>
+      )}
+
+      {/* Main Controls */}
+      <div className="card">
+        {!active ? (
+          <button 
+            className="button" 
+            onClick={start}
+            disabled={petIds.length === 0}
+            style={{ 
+              width: '100%', 
+              backgroundColor: '#4CAF50', 
+              color: 'white',
+              fontSize: '18px',
+              padding: '16px'
+            }}
+          >
+            🐕 Start Walk
+          </button>
+        ) : (
+          <div>
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <button 
+                className="button" 
+                onClick={togglePause}
+                style={{ 
+                  flex: 1,
+                  backgroundColor: paused ? '#4CAF50' : '#FF9800',
+                  color: 'white'
+                }}
+              >
+                {paused ? '▶️ Resume' : '⏸️ Pause'}
+              </button>
+              <button 
+                className="button" 
+                onClick={() => setShowFinishModal(true)}
+                style={{ 
+                  flex: 1,
+                  backgroundColor: '#f44336',
+                  color: 'white'
+                }}
+              >
+                🏁 Finish
+              </button>
+            </div>
+
+            {/* Event Markers */}
+            <div>
+              <div className="small" style={{ marginBottom: 8, fontWeight: '500' }}>Mark Events:</div>
+              <div className="row" style={{ gap: 8 }}>
+                <button 
+                  className="button" 
+                  onClick={() => drop('poop')}
+                  style={{ flex: 1, backgroundColor: '#8B4513', color: 'white' }}
+                >
+                  💩 Poop
+                </button>
+                <button 
+                  className="button" 
+                  onClick={() => drop('pee')}
+                  style={{ flex: 1, backgroundColor: '#FFD700', color: '#333' }}
+                >
+                  💧 Pee
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Finish Walk Modal */}
+      {showFinishModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: 16
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 400 }}>
+            <h3 style={{ margin: '0 0 16px 0' }}>Finish Walk</h3>
+            
+            <label>Notes (optional)</label>
+            <textarea
+              value={finishForm.notes}
+              onChange={(e) => setFinishForm({...finishForm, notes: e.target.value})}
+              placeholder="How was the walk?"
+              rows={3}
+              style={{ width: '100%', marginBottom: 12, resize: 'vertical' }}
+            />
+
+            <label>Privacy</label>
+            <select
+              value={finishForm.visibility}
+              onChange={(e) => setFinishForm({...finishForm, visibility: e.target.value})}
+              style={{ width: '100%', marginBottom: 16 }}
+            >
+              <option value="private">Private</option>
+              <option value="friends">Friends Only</option>
+              <option value="groups">Share to Groups</option>
+            </select>
+
+            <div className="row" style={{ gap: 8 }}>
+              <button 
+                className="button" 
+                onClick={() => setShowFinishModal(false)}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="button" 
+                onClick={handleFinish}
+                style={{ 
+                  flex: 1, 
+                  backgroundColor: '#4CAF50', 
+                  color: 'white' 
+                }}
+              >
+                Save Walk
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function WalkTab({ me }) {
+  const { route, events, active } = useWalk()
+  const [mapCenter, setMapCenter] = useState([40.0, -74.0])
+  const [userLocation, setUserLocation] = useState(null)
+
+  // Get user's current location for map center
+  useEffect(() => {
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords
+          setMapCenter([latitude, longitude])
+          setUserLocation([latitude, longitude])
+        },
+        () => {
+          console.log('Location access denied')
+        },
+        { enableHighAccuracy: true, maximumAge: 60000, timeout: 10000 }
+      )
+    }
+  }, [])
+
+  const pathStyle = { color: '#4CAF50', weight: 4 }
+  const routePoints = route.map(p => [p.lat, p.lon])
+  const eventMarkers = events.map((event, idx) => ({
+    ...event,
+    id: idx,
+    position: [event.lat, event.lon]
+  }))
+
+  return (
+    <div style={{ height: '100%', position: 'relative' }}>
+      {/* Map */}
+      <div style={{ height: 'calc(100% - 200px)' }}>
+        <MapContainer 
+          center={mapCenter} 
+          zoom={16} 
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; OpenStreetMap contributors'
+          />
+          
+          {/* Current route */}
+          {routePoints.length > 1 && (
+            <Polyline positions={routePoints} pathOptions={pathStyle} />
+          )}
+          
+          {/* Start marker (dog icon) */}
+          {routePoints.length > 0 && (
+            <Marker position={routePoints[0]} icon={dogIcon} />
+          )}
+          
+          {/* Current location */}
+          {userLocation && (
+            <Marker position={userLocation} icon={currentLocationIcon} />
+          )}
+          
+          {/* Event markers */}
+          {eventMarkers.map(event => (
+            <Marker
+              key={event.id}
+              position={event.position}
+              icon={event.type === 'poop' ? poopIcon : peeIcon}
+            />
+          ))}
+        </MapContainer>
+      </div>
+
+      {/* Controls Panel - Fixed at bottom */}
+      <div style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '200px',
+        backgroundColor: 'white',
+        borderTop: '1px solid #ddd',
+        overflow: 'auto',
+        padding: 12
+      }}>
+        <WalkControls />
+      </div>
     </div>
   )
 }
