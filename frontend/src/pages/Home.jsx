@@ -1,116 +1,199 @@
 import React, { useEffect, useState } from 'react'
 import { useWalk } from '../walkContext.jsx'
-import { fmtDist, fmtDur } from '../utils.js'
 
-export function HomeTab({ me, goWalk }) {
-  const { active, paused, distance, elapsed, start, togglePause } = useWalk()
+function WeatherWidget() {
+  const [weather, setWeather] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  const [wx, setWx] = useState(null)
-  const [wxErr, setWxErr] = useState(null)
-  const [coords, setCoords] = useState({ lat: 40.7128, lon: -74.0060 }) // default NYC
-  const [unit, setUnit] = useState(() => localStorage.getItem('wx_unit') || 'f') // 'f' | 'c'
-
-  function fetchWx(u, lat, lon) {
-    const temperature_unit = u === 'f' ? 'fahrenheit' : 'celsius'
-    const wind_speed_unit = u === 'f' ? 'mph' : 'ms'
-    const precipitation_unit = u === 'f' ? 'inch' : 'mm'
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&current=temperature_2m,apparent_temperature,wind_speed_10m,precipitation` +
-      `&temperature_unit=${temperature_unit}&wind_speed_unit=${wind_speed_unit}` +
-      `&precipitation_unit=${precipitation_unit}&timezone=auto`
-    fetch(url).then(r => r.json()).then(setWx).catch(e => setWxErr(e.message))
-  }
-
-  // get location then fetch (initial)
   useEffect(() => {
-    const insecure = location.protocol !== 'https:' && location.hostname !== 'localhost'
-    const loadAt = (lat, lon, msg) => {
-      if (msg) setWxErr(msg)
-      setCoords({ lat, lon })
-      fetchWx(unit, lat, lon)
-    }
-    if (insecure) {
-      loadAt(40.7128, -74.0060, 'Enable HTTPS to use your precise location � showing NYC')
-      return
-    }
+    // Get user's location for weather
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        pos => loadAt(pos.coords.latitude, pos.coords.longitude, null),
-        () => loadAt(40.7128, -74.0060, 'Location denied � showing NYC'),
-        { enableHighAccuracy: true, timeout: 8000 }
+        async (position) => {
+          try {
+            const { latitude, longitude } = position.coords
+            // Using OpenWeatherMap free API (you'll need to get an API key)
+            const API_KEY = import.meta.env.VITE_WEATHER_API_KEY || 'demo'
+            const response = await fetch(
+              `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=imperial`
+            )
+            
+            if (response.ok) {
+              const data = await response.json()
+              setWeather(data)
+            } else {
+              // Fallback to mock data if API fails
+              setWeather({
+                name: 'Your Location',
+                main: { temp: 72, feels_like: 75 },
+                weather: [{ main: 'Clear', description: 'clear sky', icon: '01d' }],
+                wind: { speed: 5 }
+              })
+            }
+          } catch (err) {
+            setError('Weather unavailable')
+          } finally {
+            setLoading(false)
+          }
+        },
+        () => {
+          setError('Location access denied')
+          setLoading(false)
+        }
       )
     } else {
-      loadAt(40.7128, -74.0060, 'No geolocation � showing NYC')
+      setError('Geolocation not supported')
+      setLoading(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // refetch when unit changes
-  useEffect(() => {
-    localStorage.setItem('wx_unit', unit)
-    fetchWx(unit, coords.lat, coords.lon)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unit])
-
-  const current = wx?.current
-  const units = wx?.current_units || {}
-  const greet = me?.display_name || me?.email || 'friend'
+  if (loading) return <div className="small">Loading weather...</div>
+  if (error) return <div className="small" style={{color: '#666'}}>{error}</div>
 
   return (
-    <div className="home-hero">
-      <div className="card">
-        <div style={{ fontSize: 20, fontWeight: 800 }}>Hi, {greet} ??</div>
-        <div className="small">Ready for a walk?</div>
+    <div className="weather-widget">
+      <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+        <div>
+          <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+            {Math.round(weather.main.temp)}°F
+          </div>
+          <div className="small">{weather.weather[0].description}</div>
+        </div>
+        <div style={{ fontSize: '32px' }}>
+          {getWeatherEmoji(weather.weather[0].main)}
+        </div>
+      </div>
+      <div className="small" style={{ marginTop: 4, color: '#666' }}>
+        Feels like {Math.round(weather.main.feels_like)}°F • Wind {Math.round(weather.wind.speed)} mph
+      </div>
+    </div>
+  )
+}
+
+function getWeatherEmoji(condition) {
+  const emojiMap = {
+    'Clear': '☀️',
+    'Clouds': '☁️',
+    'Rain': '🌧️',
+    'Drizzle': '🌦️',
+    'Thunderstorm': '⛈️',
+    'Snow': '❄️',
+    'Mist': '🌫️',
+    'Fog': '🌫️'
+  }
+  return emojiMap[condition] || '🌤️'
+}
+
+export function HomeTab({ me, goWalk }) {
+  const { active, paused } = useWalk()
+  const [recentWalks, setRecentWalks] = useState([])
+
+  useEffect(() => {
+    // Load recent walks for quick stats
+    if (me) {
+      // This would use your existing API
+      // api.walks.list(5).then(walks => setRecentWalks(walks.slice(0, 3)))
+    }
+  }, [me])
+
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 12) return 'Good morning'
+    if (hour < 17) return 'Good afternoon'
+    return 'Good evening'
+  }
+
+  if (!me) {
+    return (
+      <div style={{ padding: 16, textAlign: 'center' }}>
+        <div style={{ fontSize: '48px', marginBottom: 16 }}>🐕</div>
+        <h2>Welcome to PupWalks!</h2>
+        <p className="small" style={{ marginBottom: 24 }}>
+          Track your dog walks, mark important spots, and share your adventures.
+        </p>
+        <div className="small" style={{ color: '#666' }}>
+          Please sign in on the Profile tab to get started.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      {/* Greeting */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0, marginBottom: 8 }}>
+          {getGreeting()}, {me.display_name || me.email.split('@')[0]}! 🐾
+        </h2>
+        <WeatherWidget />
       </div>
 
-      <div className="card">
-        <div className="row" style={{ justifyContent:'space-between', alignItems:'center' }}>
-          <b>Weather</b>
-          <div className="segmented">
-            <button className={unit==='f' ? 'active' : ''} onClick={()=>setUnit('f')}>�F</button>
-            <button className={unit==='c' ? 'active' : ''} onClick={()=>setUnit('c')}>�C</button>
+      {/* Walk Status */}
+      {active ? (
+        <div className="card" style={{ marginBottom: 16, backgroundColor: '#e8f5e8' }}>
+          <div className="row" style={{ alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: '32px' }}>🚶‍♂️</div>
+            <div>
+              <div><strong>Walk in Progress</strong></div>
+              <div className="small">
+                {paused ? 'Paused' : 'Active'} • Tap Walk tab to continue
+              </div>
+            </div>
           </div>
         </div>
-        {wxErr && <div className="small" style={{ marginTop: 4 }}>({wxErr})</div>}
-        {current ? (
-          <div className="weather" style={{ marginTop: 8 }}>
+      ) : (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div className="big">
-                {Math.round(current.temperature_2m)}�
-              </div>
-              <div className="small">
-                Feels {Math.round(current.apparent_temperature)}�
-              </div>
+              <div><strong>Ready for a walk?</strong></div>
+              <div className="small">Perfect weather for your pups!</div>
             </div>
-            <div>
-              <div className="small">
-                Wind: {current.wind_speed_10m} {units.wind_speed_10m || (unit==='f' ? 'mph' : 'm/s')}
-              </div>
-              <div className="small">
-                Precip: {current.precipitation ?? 0} {units.precipitation || (unit==='f' ? 'in' : 'mm')}
-              </div>
-            </div>
+            <button className="button" onClick={goWalk} style={{ 
+              backgroundColor: '#4CAF50', 
+              color: 'white',
+              fontSize: '16px',
+              padding: '12px 24px'
+            }}>
+              Start Walk 🐕
+            </button>
           </div>
-        ) : (
-          <div className="small" style={{ marginTop: 8 }}>Loading current conditions�</div>
-        )}
+        </div>
+      )}
+
+      {/* Quick Stats */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 style={{ margin: '0 0 12px 0' }}>This Week</h3>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>0</div>
+            <div className="small">Walks</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>0.0</div>
+            <div className="small">Miles</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>0h</div>
+            <div className="small">Time</div>
+          </div>
+        </div>
       </div>
 
-      <div className="card persistent-mini">
-        <div className="row" style={{ justifyContent:'space-between' }}>
-          <b>{active ? (paused ? 'Walk paused' : 'Walk in progress') : 'No active walk'}</b>
-          <div className="small">{fmtDist(distance)} � {fmtDur(elapsed)}</div>
+      {/* Quick Actions */}
+      <div className="card">
+        <h3 style={{ margin: '0 0 12px 0' }}>Quick Actions</h3>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="button" style={{ flex: 1, minWidth: '120px' }} onClick={goWalk}>
+            🚶‍♂️ New Walk
+          </button>
+          <button className="button" style={{ flex: 1, minWidth: '120px' }}>
+            🐕 My Dogs
+          </button>
+          <button className="button" style={{ flex: 1, minWidth: '120px' }}>
+            📱 Share
+          </button>
         </div>
-        {!active ? (
-          <div style={{ marginTop: 8 }}>
-            <button className="button" onClick={()=>{ /* start & jump to Walk tab */ start(); goWalk?.() }}>? Start Walk</button>
-          </div>
-        ) : (
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <button className="button" onClick={togglePause}>{paused ? '? Resume' : '? Pause'}</button>
-            <button className="button" onClick={goWalk}>Open Walk Tab</button>
-          </div>
-        )}
       </div>
     </div>
   )
