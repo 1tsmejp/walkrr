@@ -57,9 +57,9 @@ function WalkCard({ walk, onExpand }) {
           </div>
         </div>
         <div className="small" style={{ color: '#666' }}>
-          {walk.visibility === 'private' && '🔒'}
-          {walk.visibility === 'friends' && '👥'}
-          {walk.visibility === 'groups' && '🏪'}
+          {walk.visibility === 'private' && '??'}
+          {walk.visibility === 'friends' && '??'}
+          {walk.visibility === 'groups' && '??'}
         </div>
       </div>
 
@@ -79,13 +79,13 @@ function WalkCard({ walk, onExpand }) {
         </div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '16px' }}>
-            💩 {eventCounts.poop}
+            ?? {eventCounts.poop}
           </div>
           <div className="small">Poops</div>
         </div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '16px' }}>
-            💧 {eventCounts.pee}
+            ?? {eventCounts.pee}
           </div>
           <div className="small">Pees</div>
         </div>
@@ -178,7 +178,7 @@ function WalkDetailModal({ walk, onClose }) {
               padding: '4px'
             }}
           >
-            ×
+            �
           </button>
         </div>
 
@@ -190,6 +190,12 @@ function WalkDetailModal({ walk, onClose }) {
 
         {/* Stats Grid */}
         <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>
+              {fmtDist(walk.distance_m)}
+            </div>
+            <div className="small">Total Distance</div>
+          </div>
           <div>
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>
               {fmtDur(walk.duration_s)}
@@ -204,12 +210,12 @@ function WalkDetailModal({ walk, onClose }) {
             <h4 style={{ margin: '0 0 8px 0' }}>Events</h4>
             <div className="row" style={{ gap: 16 }}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '20px' }}>💩</div>
+                <div style={{ fontSize: '20px' }}>??</div>
                 <div>{walk.events.filter(e => e.type === 'poop').length}</div>
                 <div className="small">Poops</div>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '20px' }}>💧</div>
+                <div style={{ fontSize: '20px' }}>??</div>
                 <div>{walk.events.filter(e => e.type === 'pee').length}</div>
                 <div className="small">Pees</div>
               </div>
@@ -237,7 +243,7 @@ function WalkDetailModal({ walk, onClose }) {
                       style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' }}
                     />
                   ) : (
-                    <div style={{ fontSize: '20px' }}>🐕</div>
+                    <div style={{ fontSize: '20px' }}>??</div>
                   )}
                   <span>{pet.name}</span>
                 </div>
@@ -288,7 +294,7 @@ function WalkDetailModal({ walk, onClose }) {
                   borderRadius: '12px',
                   fontSize: '14px'
                 }}>
-                  🏪 {share.group_name}
+                  ?? {share.group_name}
                 </div>
               ))}
             </div>
@@ -331,7 +337,7 @@ export function FeedTab({ me }) {
   if (!me) {
     return (
       <div style={{ padding: 16, textAlign: 'center' }}>
-        <div style={{ fontSize: '48px', marginBottom: 16 }}>📱</div>
+        <div style={{ fontSize: '48px', marginBottom: 16 }}>??</div>
         <h3>Welcome to the Feed!</h3>
         <p className="small" style={{ marginBottom: 24, color: '#666' }}>
           See your walk history and discover walks from friends and groups.
@@ -369,16 +375,16 @@ export function FeedTab({ me }) {
               opacity: loading ? 0.6 : 1
             }}
           >
-            {loading ? '⟳' : '↻'}
+            {loading ? '?' : '?'}
           </button>
         </div>
 
         {/* Filter Tabs */}
         <div className="row" style={{ gap: 8, marginTop: 12 }}>
           {[
-            { key: 'all', label: '🌍 All', count: walks.length },
-            { key: 'mine', label: '🚶‍♂️ Mine', count: walks.filter(w => w.user?.id === me?.id).length },
-            { key: 'friends', label: '👥 Friends', count: walks.filter(w => w.visibility === 'friends' && w.user?.id !== me?.id).length }
+            { key: 'all', label: '?? All', count: walks.length },
+            { key: 'mine', label: '????? Mine', count: walks.filter(w => w.user?.id === me?.id).length },
+            { key: 'friends', label: '?? Friends', count: walks.filter(w => w.visibility === 'friends' && w.user?.id !== me?.id).length }
           ].map(tab => (
             <button
               key={tab.key}
@@ -412,7 +418,7 @@ export function FeedTab({ me }) {
           </div>
         ) : filteredWalks.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: '48px', marginBottom: 16 }}>🐾</div>
+            <div style={{ fontSize: '48px', marginBottom: 16 }}>??</div>
             <h3>No walks yet</h3>
             <p className="small" style={{ color: '#666' }}>
               {filter === 'mine' 
@@ -439,10 +445,5 @@ export function FeedTab({ me }) {
         onClose={() => setSelectedWalk(null)} 
       />
     </div>
-  ) color: '#4CAF50' }}>
-              {fmtDist(walk.distance_m)}
-            </div>
-            <div className="small">Total Distance</div>
-          </div>
-          <div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold',
+  )
+}

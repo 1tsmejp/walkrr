@@ -18,8 +18,21 @@ function haversine(a, b) {
 const Ctx = createContext(null)
 export const useWalk = () => useContext(Ctx)
 
-function loadSettings() { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {} } catch { return {} } }
-function saveSettings(s) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)) } catch {} }
+function loadSettings() { 
+  try { 
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {} 
+  } catch { 
+    return {} 
+  } 
+}
+
+function saveSettings(s) { 
+  try { 
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)) 
+  } catch {
+    console.warn('Failed to save settings to localStorage')
+  } 
+}
 
 export function WalkProvider({ children }) {
   const [active, setActive] = useState(false)
@@ -31,9 +44,14 @@ export function WalkProvider({ children }) {
   const [petIds, setPetIds] = useState([])
 
   const [autoPauseOnHide, setAutoPauseOnHide] = useState(() => {
-    const s = loadSettings(); return s.autoPauseOnHide ?? true
+    const s = loadSettings()
+    return s.autoPauseOnHide ?? true
   })
-  useEffect(() => { const s = loadSettings(); saveSettings({ ...s, autoPauseOnHide }) }, [autoPauseOnHide])
+  
+  useEffect(() => { 
+    const s = loadSettings()
+    saveSettings({ ...s, autoPauseOnHide }) 
+  }, [autoPauseOnHide])
 
   const watchId = useRef(null)
   const ticker = useRef(null)
@@ -42,20 +60,40 @@ export function WalkProvider({ children }) {
   const pauseAccum = useRef(0)
   const saveTimer = useRef(null)
 
-  const clearTicker = () => { if (ticker.current) { clearInterval(ticker.current); ticker.current = null } }
+  const clearTicker = () => { 
+    if (ticker.current) { 
+      clearInterval(ticker.current)
+      ticker.current = null 
+    } 
+  }
+  
   const computeElapsedMs = () => {
     if (!t0.current) return 0
     const now = Date.now()
     const pausedBlock = paused && pausedAt.current ? (now - pausedAt.current) : 0
     return (now - t0.current) - pauseAccum.current - pausedBlock
   }
-  const startTicker = () => { clearTicker(); ticker.current = setInterval(() => setElapsed(Math.floor(Math.max(0, computeElapsedMs()) / 1000)), 1000) }
+  
+  const startTicker = () => { 
+    clearTicker()
+    ticker.current = setInterval(() => setElapsed(Math.floor(Math.max(0, computeElapsedMs()) / 1000)), 1000) 
+  }
+  
   const startWatch = () => {
     if (!('geolocation' in navigator) || watchId.current) return
-    navigator.geolocation.getCurrentPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 })
-    watchId.current = navigator.geolocation.watchPosition(onPos, () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 })
+    
+    const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    
+    navigator.geolocation.getCurrentPosition(onPos, onError, options)
+    watchId.current = navigator.geolocation.watchPosition(onPos, onError, options)
   }
-  const stopWatch = () => { if (watchId.current) { navigator.geolocation.clearWatch(watchId.current); watchId.current = null } }
+  
+  const stopWatch = () => { 
+    if (watchId.current) { 
+      navigator.geolocation.clearWatch(watchId.current)
+      watchId.current = null 
+    } 
+  }
 
   function onPos(pos) {
     if (!active || paused) return
@@ -68,31 +106,60 @@ export function WalkProvider({ children }) {
     })
   }
 
+  function onError(error) {
+    console.warn('Geolocation error:', error)
+  }
+
   function start() {
     if (active) return
-    setRoute([]); setEvents([]); setDistance(0); setElapsed(0); setPaused(false)
-    pauseAccum.current = 0; pausedAt.current = null
+    setRoute([])
+    setEvents([])
+    setDistance(0)
+    setElapsed(0)
+    setPaused(false)
+    pauseAccum.current = 0
+    pausedAt.current = null
     t0.current = Date.now()
     setActive(true)
-    startTicker(); startWatch()
+    startTicker()
+    startWatch()
     queueSave(0)
   }
 
-  function pause() { if (!active || paused) return; setPaused(true); pausedAt.current = Date.now(); clearTicker(); queueSave(0) }
+  function pause() { 
+    if (!active || paused) return
+    setPaused(true)
+    pausedAt.current = Date.now()
+    clearTicker()
+    queueSave(0) 
+  }
+  
   function resume() {
     if (!active || !paused) return
     if (pausedAt.current) pauseAccum.current += (Date.now() - pausedAt.current)
-    pausedAt.current = null; setPaused(false); startTicker(); startWatch(); queueSave(0)
+    pausedAt.current = null
+    setPaused(false)
+    startTicker()
+    startWatch()
+    queueSave(0)
   }
-  function togglePause() { paused ? resume() : pause() }
+  
+  function togglePause() { 
+    paused ? resume() : pause() 
+  }
 
-  async function finish(opts={}) {
-    // opts: { notes?: string, group_ids?: number[], visibility?: 'private'|'friends'|'groups' }
+  async function finish(opts = {}) {
     if (!active) return
     const finalMs = Math.max(0, computeElapsedMs())
     setElapsed(Math.floor(finalMs / 1000))
-    stopWatch(); clearTicker()
-    if (!route.length) { reset(); return }
+    stopWatch()
+    clearTicker()
+    
+    if (!route.length) { 
+      reset()
+      return 
+    }
+    
     try {
       await api.walks.create({
         pet_ids: petIds,
@@ -101,24 +168,45 @@ export function WalkProvider({ children }) {
         duration_s: Math.floor(finalMs / 1000),
         events,
         notes: opts.notes || '',
-        visibility: opts.visibility || 'private',
+        privacy: opts.visibility || 'private', // Note: backend uses 'privacy' not 'visibility'
         group_ids: Array.isArray(opts.group_ids) ? opts.group_ids : []
       })
-    } finally { reset() }
+    } catch (error) {
+      console.error('Failed to save walk:', error)
+      throw error
+    } finally { 
+      reset() 
+    }
   }
 
   function reset() {
-    setActive(false); setPaused(false)
-    setRoute([]); setEvents([]); setDistance(0); setElapsed(0)
-    t0.current = null; pausedAt.current = null; pauseAccum.current = 0
-    stopWatch(); clearTicker()
-    try { localStorage.removeItem(STORE_KEY) } catch {}
+    setActive(false)
+    setPaused(false)
+    setRoute([])
+    setEvents([])
+    setDistance(0)
+    setElapsed(0)
+    t0.current = null
+    pausedAt.current = null
+    pauseAccum.current = 0
+    stopWatch()
+    clearTicker()
+    try { 
+      localStorage.removeItem(STORE_KEY) 
+    } catch {
+      console.warn('Failed to clear walk data from localStorage')
+    }
   }
 
   function drop(type) {
     const last = route.at(-1)
     if (!last) return
-    setEvents(prev => [...prev, { type, lat: last.lat, lon: last.lon, occurred_at: new Date().toISOString() }])
+    setEvents(prev => [...prev, { 
+      type, 
+      lat: last.lat, 
+      lon: last.lon, 
+      occurred_at: new Date().toISOString() 
+    }])
   }
 
   function saveNow() {
@@ -127,46 +215,86 @@ export function WalkProvider({ children }) {
         active, paused, route, events, distance, petIds,
         t0: t0.current, pausedAt: pausedAt.current, pauseAccum: pauseAccum.current, savedAt: Date.now()
       }))
-    } catch {}
+    } catch {
+      console.warn('Failed to save walk data to localStorage')
+    }
   }
-  function queueSave(delay = 400) { if (saveTimer.current) clearTimeout(saveTimer.current); saveTimer.current = setTimeout(saveNow, delay) }
+  
+  function queueSave(delay = 400) { 
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(saveNow, delay) 
+  }
 
+  // Load saved state on mount
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORE_KEY); if (!raw) return
-      const s = JSON.parse(raw); if (!s || !s.t0) return
-      t0.current = s.t0; pauseAccum.current = s.pauseAccum || 0; pausedAt.current = s.paused ? (s.pausedAt || Date.now()) : null
-      setActive(!!s.active); setPaused(!!s.paused)
-      setRoute(Array.isArray(s.route) ? s.route : []); setEvents(Array.isArray(s.events) ? s.events : [])
-      setDistance(Number(s.distance || 0)); setPetIds(Array.isArray(s.petIds) ? s.petIds : [])
+      const raw = localStorage.getItem(STORE_KEY)
+      if (!raw) return
+      const s = JSON.parse(raw)
+      if (!s || !s.t0) return
+      
+      t0.current = s.t0
+      pauseAccum.current = s.pauseAccum || 0
+      pausedAt.current = s.paused ? (s.pausedAt || Date.now()) : null
+      
+      setActive(!!s.active)
+      setPaused(!!s.paused)
+      setRoute(Array.isArray(s.route) ? s.route : [])
+      setEvents(Array.isArray(s.events) ? s.events : [])
+      setDistance(Number(s.distance || 0))
+      setPetIds(Array.isArray(s.petIds) ? s.petIds : [])
+      
       const ms = Math.max(0, (Date.now() - s.t0) - (s.pauseAccum || 0) - (s.paused && s.pausedAt ? (Date.now() - s.pausedAt) : 0))
       setElapsed(Math.floor(ms / 1000))
-      if (s.active) { if (!s.paused) startTicker(); startWatch() }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      
+      if (s.active) { 
+        if (!s.paused) startTicker()
+        startWatch() 
+      }
+    } catch (error) {
+      console.warn('Failed to restore walk state:', error)
+    }
   }, [])
 
-  useEffect(() => { if (active) queueSave() }, [active, paused, route.length, events.length, distance, elapsed, petIds])
+  // Save state when it changes
+  useEffect(() => { 
+    if (active) queueSave() 
+  }, [active, paused, route.length, events.length, distance, elapsed, petIds])
 
+  // Handle visibility changes
   useEffect(() => {
     const onVis = () => {
       if (document.hidden) {
-        if (active && autoPauseOnHide && !paused) { pausedAt.current = Date.now(); setPaused(true); clearTicker() }
+        if (active && autoPauseOnHide && !paused) { 
+          pausedAt.current = Date.now()
+          setPaused(true)
+          clearTicker() 
+        }
         queueSave(0)
-      } else { if (active && !paused) startTicker(); queueSave(0) }
+      } else { 
+        if (active && !paused) startTicker()
+        queueSave(0) 
+      }
     }
+    
     const onBeforeUnload = () => saveNow()
+    
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('pagehide', onBeforeUnload)
     window.addEventListener('beforeunload', onBeforeUnload)
+    
     return () => {
       document.removeEventListener('visibilitychange', onVis)
       window.removeEventListener('pagehide', onBeforeUnload)
-      window.removeEventListener('beforeunload', onBeforeunload)
+      window.removeEventListener('beforeunload', onBeforeUnload)
     }
   }, [active, paused, autoPauseOnHide])
 
-  useEffect(() => () => { if (watchId.current) navigator.geolocation.clearWatch(watchId.current); clearTicker() }, [])
+  // Cleanup on unmount
+  useEffect(() => () => { 
+    if (watchId.current) navigator.geolocation.clearWatch(watchId.current)
+    clearTicker() 
+  }, [])
 
   const value = useMemo(() => ({
     active, paused, route, events, distance, elapsed, petIds,

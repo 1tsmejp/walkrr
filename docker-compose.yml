@@ -1,24 +1,32 @@
+version: '3.8'
+
 services:
   db:
     image: postgres:15
+    container_name: walkrr_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pupwalks}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pupwalks}
       POSTGRES_DB: ${POSTGRES_DB:-pupwalks}
-    ports:
-      - "5432:5432"
     volumes:
       - dbdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pupwalks} -d ${POSTGRES_DB:-pupwalks}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+    networks:
+      - walkrr-internal
+    # Don't expose port externally for security
+    # ports:
+    #   - "5432:5432"
 
   backend:
     build:
       context: ./backend
+      dockerfile: Dockerfile
+    container_name: walkrr_backend
     depends_on:
       db:
         condition: service_healthy
@@ -31,22 +39,47 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
     ports:
-      - "4000:4000"
+      - "4000:4000"  # Expose for Nginx Proxy Manager
     volumes:
       - uploads:/app/uploads
+    networks:
+      - walkrr-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
+    container_name: walkrr_frontend
     environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
-      VITE_PUBLIC_HOST: ${VITE_PUBLIC_HOST:-}
-      VITE_PUBLIC_HTTPS: ${VITE_PUBLIC_HTTPS:-false}
+      # API Configuration
+      VITE_API_URL: https://api.walkrr.patti.tech
+      
+      # Vite Configuration
+      VITE_PUBLIC_HOST: walkrr.patti.tech
+      VITE_PUBLIC_HTTPS: "true"
+      
+      # Weather API (optional)
+      VITE_WEATHER_API_KEY: ${VITE_WEATHER_API_KEY:-}
     ports:
-      - "5173:5173"
+      - "5173:5173"  # Expose for Nginx Proxy Manager
     depends_on:
       - backend
+    networks:
+      - walkrr-internal
+    restart: unless-stopped
 
 volumes:
   dbdata:
+    driver: local
   uploads:
+    driver: local
+
+networks:
+  walkrr-internal:
+    driver: bridge
